@@ -20,7 +20,7 @@ jobs:
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping"
+          --health-cmd="mysqladmin ping -u root -p${MYSQL_ROOT_PASSWORD}"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=3
@@ -45,6 +45,8 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Run performance tests
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
         run: |
           # Create test data
           cat > create_test_data.sql << 'EOF'
@@ -108,7 +110,7 @@ jobs:
           
           # Test 5: Migration performance
           echo "Testing migration performance..."
-          migration_time=$(measure_time mysql -f create_test_data.sql -v "20240315000000_PerformanceTest" -n)
+          migration_time=$(measure_time mysql -h 127.0.0.1 -u root -p"$MYSQL_ROOT_PASSWORD" -f create_test_data.sql -v "20240315000000_PerformanceTest" -n)
           echo "Migration dry-run time: ${migration_time}s"
           
           # Test 6: Memory usage
@@ -130,7 +132,7 @@ jobs:
             # Run tests
             docker run --rm --platform linux/$arch \
               --network host \
-              -e MYSQL_ROOT_PASSWORD="${{ secrets.MYSQL_ROOT_PASSWORD }}" \
+              -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
               tiny-mysql-client:perf \
               /performance_test.sh
             
