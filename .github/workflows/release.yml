@@ -34,6 +34,9 @@ jobs:
     name: Publish Docker Image
     needs: release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -43,16 +46,17 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version from tag
+      - name: Set version from tag
         id: version
         run: |
-          if [[ ${{ github.ref }} =~ refs/tags/v(.*) ]]; then
+          if [[ ${{ github.ref }} =~ refs/tags/v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
             echo "VERSION=${BASH_REMATCH[1]}" >> $GITHUB_ENV
           else
             echo "VERSION=latest" >> $GITHUB_ENV
@@ -65,8 +69,8 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.VERSION }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:latest
+            ghcr.io/${{ github.repository }}:${{ env.VERSION }}
+            ghcr.io/${{ github.repository }}:latest
           labels: |
             org.opencontainers.image.title=Tiny MySQL Client
             org.opencontainers.image.description=A minimal MySQL client container
@@ -83,15 +87,18 @@ jobs:
           # Test both architectures
           for arch in amd64 arm64; do
             echo "Verifying $arch architecture..."
-            docker pull --platform linux/$arch ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.VERSION }}
-            docker run --rm --platform linux/$arch ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.VERSION }} --version
-            docker run --rm --platform linux/$arch ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.VERSION }} -h
+            docker pull --platform linux/$arch ghcr.io/${{ github.repository }}:${{ env.VERSION }}
+            docker run --rm --platform linux/$arch ghcr.io/${{ github.repository }}:${{ env.VERSION }} --version
+            docker run --rm --platform linux/$arch ghcr.io/${{ github.repository }}:${{ env.VERSION }} -h
           done
 
   branch-release:
     name: Branch Release
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/heads/')
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -103,11 +110,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract branch name
         id: branch
@@ -122,7 +130,7 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.BRANCH }}
+            ghcr.io/${{ github.repository }}:${{ env.BRANCH }}
           labels: |
             org.opencontainers.image.title=Tiny MySQL Client
             org.opencontainers.image.description=A minimal MySQL client container
@@ -139,7 +147,7 @@ jobs:
           # Test both architectures
           for arch in amd64 arm64; do
             echo "Verifying $arch architecture..."
-            docker pull --platform linux/$arch ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.BRANCH }}
-            docker run --rm --platform linux/$arch ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.BRANCH }} --version
-            docker run --rm --platform linux/$arch ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.BRANCH }} -h
+            docker pull --platform linux/$arch ghcr.io/${{ github.repository }}:${{ env.BRANCH }}
+            docker run --rm --platform linux/$arch ghcr.io/${{ github.repository }}:${{ env.BRANCH }} --version
+            docker run --rm --platform linux/$arch ghcr.io/${{ github.repository }}:${{ env.BRANCH }} -h
           done 
