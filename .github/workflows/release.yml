@@ -1,0 +1,145 @@
+name: Release and Publish
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Matches semver tags
+    branches:
+      - main
+      - develop
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ github.ref_name }}
+          body: |
+            Changes in this Release:
+            ${{ github.event.head_commit.message }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    name: Publish Docker Image
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ ${{ github.ref }} =~ refs/tags/v(.*) ]]; then
+            echo "VERSION=${BASH_REMATCH[1]}" >> $GITHUB_ENV
+          else
+            echo "VERSION=latest" >> $GITHUB_ENV
+          fi
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.VERSION }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:latest
+          labels: |
+            org.opencontainers.image.title=Tiny MySQL Client
+            org.opencontainers.image.description=A minimal MySQL client container
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.architectures=amd64,arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify published images
+        run: |
+          # Test both architectures
+          for arch in amd64 arm64; do
+            echo "Verifying $arch architecture..."
+            docker pull --platform linux/$arch ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.VERSION }}
+            docker run --rm --platform linux/$arch ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.VERSION }} --version
+            docker run --rm --platform linux/$arch ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.VERSION }} -h
+          done
+
+  branch-release:
+    name: Branch Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/heads/')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract branch name
+        id: branch
+        run: |
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          echo "BRANCH=${BRANCH_NAME}" >> $GITHUB_ENV
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.BRANCH }}
+          labels: |
+            org.opencontainers.image.title=Tiny MySQL Client
+            org.opencontainers.image.description=A minimal MySQL client container
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.version=${{ env.BRANCH }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.architectures=amd64,arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify published images
+        run: |
+          # Test both architectures
+          for arch in amd64 arm64; do
+            echo "Verifying $arch architecture..."
+            docker pull --platform linux/$arch ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.BRANCH }}
+            docker run --rm --platform linux/$arch ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.BRANCH }} --version
+            docker run --rm --platform linux/$arch ${{ secrets.DOCKERHUB_USERNAME }}/tiny-mysql-client:${{ env.BRANCH }} -h
+          done 

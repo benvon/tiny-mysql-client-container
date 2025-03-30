@@ -1,0 +1,84 @@
+name: Test and Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test -v ./...
+
+  build:
+    name: Build
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64,linux/arm64
+          tags: tiny-mysql-client:test
+          labels: |
+            org.opencontainers.image.title=Tiny MySQL Client
+            org.opencontainers.image.description=A minimal MySQL client container
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.version=${{ github.sha }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.architectures=amd64,arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify build
+        run: |
+          # Test on both architectures
+          for arch in amd64 arm64; do
+            echo "Testing $arch architecture..."
+            
+            # Test basic functionality
+            docker run --rm --platform linux/$arch tiny-mysql-client:test --version
+            docker run --rm --platform linux/$arch tiny-mysql-client:test -h
+            
+            # Test with a MySQL server
+            docker run -d --name mysql-test-$arch --platform linux/$arch \
+              -e MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_TEST_PASSWORD }} \
+              -e MYSQL_DATABASE=testdb \
+              mysql:8.0
+            
+            # Wait for MySQL to be ready
+            sleep 10
+            
+            # Test MySQL connection
+            docker run --rm --platform linux/$arch --link mysql-test-$arch:mysql \
+              tiny-mysql-client:test -h mysql -u root -p${{ secrets.MYSQL_TEST_PASSWORD }} -e "SELECT 1;"
+            
+            # Cleanup
+            docker stop mysql-test-$arch
+            docker rm mysql-test-$arch
+          done 
