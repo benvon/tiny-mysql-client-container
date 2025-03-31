@@ -38,7 +38,7 @@ jobs:
           for i in {1..30}; do
             if mysqladmin -h 127.0.0.1 -u testuser -p${{ secrets.MYSQL_TEST_PASSWORD }} ping >/dev/null 2>&1; then
               echo "MySQL is ready"
-              mysql -u root -p${{ secrets.MYSQL_ROOT_PASSWORD }} -e "CREATE DATABASE testdb;"
+              mysql -u root -p${{ secrets.MYSQL_ROOT_PASSWORD }} -h 127.0.0.1 -e "CREATE DATABASE testdb;"
               exit 0
             fi
             echo "Waiting for MySQL to be ready... ($i/30)"
