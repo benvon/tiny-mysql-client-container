@@ -37,6 +37,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -91,6 +92,8 @@ jobs:
             docker run --rm --platform linux/$arch ghcr.io/${{ github.repository }}:${{ env.VERSION }} --version
             docker run --rm --platform linux/$arch ghcr.io/${{ github.repository }}:${{ env.VERSION }} -h
           done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   branch-release:
     name: Branch Release

@@ -11,28 +11,34 @@ jobs:
   performance:
     name: Performance Tests
     runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
-          MYSQL_DATABASE: testdb
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=3
+    # services:
+    #   mysql:
+    #     image: mysql:8.0
+    #     env:
+    #       MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+    #       MYSQL_DATABASE: testdb
+    #     ports:
+    #       - 3306:3306
+    #     options: >-
+    #       --health-cmd="mysqladmin ping --host 127.0.0.1 --port 3306"
+    #       --health-interval=10s
+    #       --health-timeout=5s
+    #       --health-retries=3
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Start built-in MySQL server
+        run: |
+          sudo /etc/init.d/mysql start
+          
+
       - name: Wait for MySQL to be ready
         run: |
           for i in {1..30}; do
-            if mysql -h 127.0.0.1 -u root -p"${{ secrets.MYSQL_ROOT_PASSWORD }}" -e "SELECT 1;" >/dev/null 2>&1; then
+            if mysqladmin -h 127.0.0.1 -u testuser -p${{ secrets.MYSQL_TEST_PASSWORD }} ping >/dev/null 2>&1; then
               echo "MySQL is ready"
+              mysql -u root -p${{ secrets.MYSQL_ROOT_PASSWORD }} -e "CREATE DATABASE testdb;"
               exit 0
             fi
             echo "Waiting for MySQL to be ready... ($i/30)"
