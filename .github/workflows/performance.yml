@@ -1,0 +1,154 @@
+name: Performance Testing
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  performance:
+    if: false
+    name: Performance Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start built-in MySQL server
+        run: |
+          sudo /etc/init.d/mysql start
+          
+
+      - name: Wait for MySQL to be ready
+        run: |
+          for i in {1..30}; do
+            if mysqladmin -h 127.0.0.1 -u root -proot ping >/dev/null 2>&1; then
+              echo "MySQL is ready"
+              mysql -u root -proot -h 127.0.0.1 -e "CREATE DATABASE testdb;"
+              exit 0
+            fi
+            echo "Waiting for MySQL to be ready... ($i/30)"
+            sleep 1
+          done
+          exit 1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build test image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64,linux/arm64
+          tags: tiny-mysql-client:perf
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run performance tests
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        run: |
+          # Create test data
+          cat > create_test_data.sql << 'EOF'
+          CREATE TABLE performance_test (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            data VARCHAR(255),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+          
+          -- Insert 1000 rows
+          INSERT INTO performance_test (data)
+          SELECT CONCAT('Test data ', n) FROM (
+            SELECT a.N + b.N * 10 + c.N * 100 + 1 n
+            FROM (SELECT 0 as N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) a,
+                 (SELECT 0 as N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) b,
+                 (SELECT 0 as N UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9) c
+            LIMIT 1000
+          ) numbers;
+          EOF
+
+          # Create test script
+          cat > performance_test.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          # Function to measure execution time
+          measure_time() {
+            local start=$(date +%s.%N)
+            "$@"
+            local end=$(date +%s.%N)
+            echo "scale=3; ($end - $start)" | bc
+          }
+          
+          # Test 1: Connection time
+          echo "Testing connection time..."
+          connection_time=$(measure_time mysql -h 127.0.0.1 -u root -p"$MYSQL_ROOT_PASSWORD" -e "SELECT 1;")
+          echo "Connection time: ${connection_time}s"
+          
+          # Test 2: Simple query performance
+          echo "Testing simple query performance..."
+          simple_query_time=$(measure_time mysql -h 127.0.0.1 -u root -p"$MYSQL_ROOT_PASSWORD" -e "SELECT COUNT(*) FROM performance_test;")
+          echo "Simple query time: ${simple_query_time}s"
+          
+          # Test 3: Complex query performance
+          echo "Testing complex query performance..."
+          complex_query_time=$(measure_time mysql -h 127.0.0.1 -u root -p"$MYSQL_ROOT_PASSWORD" -e "
+            SELECT DATE(created_at) as date, COUNT(*) as count
+            FROM performance_test
+            GROUP BY DATE(created_at)
+            ORDER BY date DESC
+            LIMIT 10;")
+          echo "Complex query time: ${complex_query_time}s"
+          
+          # Test 4: Large result set performance
+          echo "Testing large result set performance..."
+          large_result_time=$(measure_time mysql -h 127.0.0.1 -u root -p"$MYSQL_ROOT_PASSWORD" -e "
+            SELECT * FROM performance_test
+            ORDER BY created_at DESC
+            LIMIT 100;")
+          echo "Large result set time: ${large_result_time}s"
+          
+          # Test 5: Migration performance
+          echo "Testing migration performance..."
+          migration_time=$(measure_time mysql -h 127.0.0.1 -u root -p"$MYSQL_ROOT_PASSWORD" -f create_test_data.sql -v "20240315000000_PerformanceTest" -n)
+          echo "Migration dry-run time: ${migration_time}s"
+          
+          # Test 6: Memory usage
+          echo "Testing memory usage..."
+          docker stats --no-stream --format "{{.MemUsage}}" tiny-mysql-client:perf
+          EOF
+          
+          chmod +x performance_test.sh
+          
+          # Run tests for both architectures
+          for arch in amd64 arm64; do
+            echo "Running performance tests for $arch architecture..."
+            echo "----------------------------------------"
+            
+            # Copy test files into container
+            docker cp create_test_data.sql tiny-mysql-client:perf:/create_test_data.sql
+            docker cp performance_test.sh tiny-mysql-client:perf:/performance_test.sh
+            
+            # Run tests
+            docker run --rm --platform linux/$arch \
+              --network host \
+              -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
+              tiny-mysql-client:perf \
+              /performance_test.sh
+            
+            echo "----------------------------------------"
+          done
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: |
+            create_test_data.sql
+            performance_test.sh 

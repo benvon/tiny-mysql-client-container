@@ -1,0 +1,94 @@
+name: Test and Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test -v ./...
+
+  build:
+    name: Build (${{ matrix.arch }})
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          platforms: linux/${{ matrix.arch }}
+          tags: tiny-mysql-client:test
+          labels: |
+            org.opencontainers.image.title=Tiny MySQL Client
+            org.opencontainers.image.description=A minimal MySQL client container
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.version=${{ github.sha }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.architectures=${{ matrix.arch }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      - name: Verify build
+        run: |
+          echo "Testing ${{ matrix.arch }} architecture..."
+          
+          docker run --rm --platform linux/${{ matrix.arch }} tiny-mysql-client:test --version
+          
+          docker run -d --name mysql-test-${{ matrix.arch }} --platform linux/${{ matrix.arch }} \
+            -e MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_TEST_PASSWORD }} \
+            -e MYSQL_DATABASE=testdb \
+            mysql:8.0
+          
+          echo "Waiting for MySQL..."
+          for i in {1..30}; do
+            if docker exec mysql-test-${{ matrix.arch }} mysqladmin ping -hlocalhost -uroot -p"${{ secrets.MYSQL_TEST_PASSWORD }}" --silent; then
+              echo "MySQL is ready."
+              break
+            fi
+            echo -n "."
+            sleep 1
+          done
+          if ! docker exec mysql-test-${{ matrix.arch }} mysqladmin ping -hlocalhost -uroot -p"${{ secrets.MYSQL_TEST_PASSWORD }}" --silent; then
+             echo "MySQL failed to start."
+             docker logs mysql-test-${{ matrix.arch }}
+             exit 1
+          fi
+          
+          # Test MySQL connection using positional argument for query
+          docker run --rm --platform linux/${{ matrix.arch }} --link mysql-test-${{ matrix.arch }}:mysql \
+            tiny-mysql-client:test -h mysql-test-${{ matrix.arch }} -u root -P${{ secrets.MYSQL_TEST_PASSWORD }} "SELECT 1;"
+          
+          # Cleanup
+          docker stop mysql-test-${{ matrix.arch }}
+          docker rm mysql-test-${{ matrix.arch }} 
