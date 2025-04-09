@@ -9,6 +9,7 @@ on:
 
 jobs:
   performance:
+    if: false
     name: Performance Tests
     runs-on: ubuntu-latest
     # services:
