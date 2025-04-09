@@ -83,17 +83,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # - name: Verify published images
-      #   run: |
-      #     # Test both architectures
-      #     for arch in amd64 arm64; do
-      #       echo "Verifying $arch architecture..."
-      #       docker pull --platform linux/$arch ghcr.io/${{ github.repository }}:${{ env.VERSION }}
-      #       docker run --rm --platform linux/$arch ghcr.io/${{ github.repository }}:${{ env.VERSION }} --version
-      #       docker run --rm --platform linux/$arch ghcr.io/${{ github.repository }}:${{ env.VERSION }} -h
-      #     done
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   branch-release:
     name: Branch Release
@@ -145,12 +134,3 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # - name: Verify published images
-      #   run: |
-      #     # Test both architectures
-      #     for arch in amd64 arm64; do
-      #       echo "Verifying $arch architecture..."
-      #       docker pull --platform linux/$arch ghcr.io/${{ github.repository }}:${{ env.BRANCH }}
-      #       docker run --rm --platform linux/$arch ghcr.io/${{ github.repository }}:${{ env.BRANCH }} --version
-      #       docker run --rm --platform linux/$arch ghcr.io/${{ github.repository }}:${{ env.BRANCH }} -h
-      #     done 
